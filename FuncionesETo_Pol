@@ -1,0 +1,265 @@
+//FUNCIONES PARA CALCULAR LA ETO
+//********************************************************************************************************
+//FUNCIONES PARA EXPORTAR
+//********************************************************************************************************
+//ETO CON HARGREAVES AND SAMANI
+exports.ETo_HS=function (Tmax, Tmin, Tmen, DOI, Kh_Value, Kt_value, Eh_Value)
+{
+  var Raf=RadiacionExtraterrestre(Tmax,DOI);
+  var ETO_3 = Raf.expression(
+            ' 0.408 *Kh * Ho * (Tmean + Kt) * (Tmax - Tmin) ** Eh', 
+            { 'Tmax'       : Tmax.select('Temp'),
+              'Tmin'       : Tmin.select('Temp'),
+              'Tmean'      : Tmen.select('Temp'),
+              'Ho'         : Raf.select ('Ra_24h'),
+              'Eh'         : ee.Number(Eh_Value),
+              'Kt'         : ee.Number(Kt_value),
+              'Kh'         : ee.Number(Kh_Value),              
+            })
+            .rename('ET0');
+  return ETO_3;
+};
+exports.ETo_HSCFsV2=function (Tmax, Tmin, DOI, Kh_Value, Kt_value, Eh_Value)
+{
+  var Raf=RadiacionExtraterrestre(Tmax,DOI);
+  var ETO_3 = Raf.expression(
+            ' 0.408 *Kh * Ho * ((Tmax+Tmin)/2 + Kt) * (Tmax - Tmin) ** Eh', 
+            { 'Tmax'       : Tmax.select('Tmax'),
+              'Tmin'       : Tmin.select('Tmin'),
+              'Ho'         : Raf.select ('Ra_24h'),
+              'Eh'         : ee.Number(Eh_Value),
+              'Kt'         : ee.Number(Kt_value),
+              'Kh'         : ee.Number(Kh_Value),              
+            })
+            .rename('ET0');
+  return ETO_3;
+};
+//ETO CON PM
+exports.ETo_PM=function(Tmax, Tmin, Tmean,VPPM,RsPM,U2PM, P, DOI, ElevaValue)
+{
+  
+  var a = Tmean.expression( //Pendiente de la curva de presión de saturación de vapor
+            ' 4098 *(0.6108 *exp( (Tmean * 17.27) / (Tmean+237.3)))/(Tmean+237.3) ** 2', 
+            { 'Tmean'      : Tmean.select('Temp'),
+            })
+            .rename('a');
+  var cs= Tmean.expression( //Constante Psicrométrica (y) 
+            '1.013 * 0.001*(P/1000)/(0.622*2.45)', 
+            { 'P'      : P.select('P'),
+            })
+            .rename('cs');
+ var Es =Tmin.expression( //Presion de vapor a saturacion 
+            ' ((0.6108 *exp( (Tmax * 17.27) / (Tmax+237.3))) + (0.6108 *exp( (Tmin * 17.27) / (Tmin+237.3))))/2', 
+            { 'Tmax'       : Tmax.select('Temp'),
+              'Tmin'       : Tmin.select('Temp'),
+            })
+            .rename('Es');            
+  var Ra = RadiacionExtraterrestre(Tmean,DOI); //RS
+  var Rso = Ra.expression( //Presion de vapor a saturacion 
+            ' (0.75+0.00002*Z)*Ra', 
+            { 'Z'       : ElevaValue.select('elevation'),
+              'Ra'       : Ra.select('Ra_24h'),
+            })
+            .rename('Rso');   
+  var Rns = RsPM.expression( //Presion de vapor a saturacion 
+            '( 1-0.23)*Rs', 
+            { 'Rs'       : RsPM.select('Rs'),
+            })
+            .rename('Rns');   
+  var Rnl = RsPM.expression( //Presion de vapor a saturacion 
+            '0.000000004903*((Tmax+273.16)**4+(Tmin+273.16)**4)/2*(0.34-0.14*Ea**0.5)*(1.35*Rs/Rso-0.35)', 
+            { 'Rs'       : RsPM.select('Rs'),
+              'Tmax'       : Tmax.select('Temp'),
+              'Tmin'       : Tmin.select('Temp'),
+              'Ea'         : VPPM.select('VP'),
+              'Rso'         : Rso.select('Rso'),
+            })
+            .rename('Rnl'); 
+  var EToPM_ser = Rnl.expression( //Presion de vapor a saturacion 
+            '(0.408*(Rns-Rnl)*a+y*(900/(T+273))*u2*(es-ea))/(a+y*(1+0.34*u2))', 
+            { 'Rns'       : Rns.select('Rns'),
+              'Rnl'       : Rnl.select('Rnl'),
+              'a'         : a.select('a'),
+              'y'         : cs.select('cs'),
+              'T'         : Tmean.select('Temp'),
+              'u2'        : U2PM.select('u2'),
+              'es'        : Es.select('Es'),
+              'ea'        : VPPM.select('VP'),
+            })
+            .rename('ETo');   
+  return EToPM_ser;
+};
+
+//ETO CON PM CFsV2
+exports.ETo_PMCFsV2=function(Tmax, Tmin, VPPM,RsPM,U2PM, P, DOI, ElevaValue)
+{
+  var Tmean=Tmax.expression( //Pendiente de la curva de presión de saturación de vapor
+            '(Tmin+Tmax)/2', 
+            { 'Tmax'      : Tmax.select('Tmax'),
+              'Tmin'      : Tmin.select('Tmin'),
+            })
+            .rename('Temp');
+  
+  var a = Tmean.expression( //Pendiente de la curva de presión de saturación de vapor
+            ' 4098 *(0.6108 *exp( (Tmean * 17.27) / (Tmean+237.3)))/(Tmean+237.3) ** 2', 
+            { 'Tmean'      : Tmean.select('Temp'),
+            })
+            .rename('a');
+  var cs= Tmean.expression( //Constante Psicrométrica (y) 
+            '1.013 * 0.001*(P/1000)/(0.622*2.45)', 
+            { 'P'      : P.select('P'),
+            })
+            .rename('cs');
+ var Es =Tmin.expression( //Presion de vapor a saturacion 
+            ' ((0.6108 *exp( (Tmax * 17.27) / (Tmax+237.3))) + (0.6108 *exp( (Tmin * 17.27) / (Tmin+237.3))))/2', 
+            { 'Tmax'       : Tmax.select('Tmax'),
+              'Tmin'       : Tmin.select('Tmin'),
+            })
+            .rename('Es');            
+  var Ra = RadiacionExtraterrestre(Tmean,DOI); //RS
+  var Rso = Ra.expression( //Presion de vapor a saturacion 
+            ' (0.75+0.00002*Z)*Ra', 
+            { 'Z'       : ElevaValue.select('elevation'),
+              'Ra'       : Ra.select('Ra_24h'),
+            })
+            .rename('Rso');   
+  var Rns = RsPM.expression( //Presion de vapor a saturacion 
+            '( 1-0.23)*Rs', 
+            { 'Rs'       : RsPM.select('Rs'),
+            })
+            .rename('Rns');   
+  var Rnl = RsPM.expression( //Presion de vapor a saturacion 
+            '0.000000004903*((Tmax+273.16)**4+(Tmin+273.16)**4)/2*(0.34-0.14*Ea**0.5)*(1.35*Rs/Rso-0.35)', 
+            { 'Rs'       : RsPM.select('Rs'),
+              'Tmax'       : Tmax.select('Tmax'),
+              'Tmin'       : Tmin.select('Tmin'),
+              'Ea'         : VPPM.select('VP'),
+              'Rso'         : Rso.select('Rso'),
+            })
+            .rename('Rnl'); 
+  var EToPM_ser = Rnl.expression( //Presion de vapor a saturacion 
+            '(0.408*(Rns-Rnl)*a+y*(900/(T+273))*u2*(es-ea))/(a+y*(1+0.34*u2))', 
+            { 'Rns'       : Rns.select('Rns'),
+              'Rnl'       : Rnl.select('Rnl'),
+              'a'         : a.select('a'),
+              'y'         : cs.select('cs'),
+              'T'         : Tmean.select('Temp'),
+              'u2'        : U2PM.select('u2'),
+              'es'        : Es.select('Es'),
+              'ea'        : VPPM.select('VP'),
+            })
+            .rename('ETo');   
+  return EToPM_ser;
+};
+
+//PM con RTMA
+exports.ETo_PMRTMA=function(Tmax, Tmin, Tmean,VPPM,RsPM2,U2PM, P, DOI, ElevaValue)
+{
+
+  
+  var a = Tmean.expression( //Pendiente de la curva de presión de saturación de vapor
+            ' 4098 *(0.6108 *exp( (Tmean * 17.27) / (Tmean+237.3)))/(Tmean+237.3) ** 2', 
+            { 'Tmean'      : Tmean.select('Temp'),
+            })
+            .rename('a');
+  var cs= Tmean.expression( //Constante Psicrométrica (y) 
+            '1.013 * 0.001*(P/1000)/(0.622*2.45)', 
+            { 'P'      : P.select('P'),
+            })
+            .rename('cs');
+ var Es =Tmin.expression( //Presion de vapor a saturacion 
+            ' ((0.6108 *exp( (Tmax * 17.27) / (Tmax+237.3))) + (0.6108 *exp( (Tmin * 17.27) / (Tmin+237.3))))/2', 
+            { 'Tmax'       : Tmax.select('Temp'),
+              'Tmin'       : Tmin.select('Temp'),
+            })
+            .rename('Es');            
+  var Ra = RadiacionExtraterrestre(Tmean,DOI); //RS
+  var RsPM= Ra.expression( //Radiacion con Nubosidad
+            ' Ra*Rs', 
+            { 'Ra'       : Ra.select('Ra_24h'),
+              'Rs'       : RsPM2.select('Rs'),
+            })
+            .rename('Rs');
+  var Rso = Ra.expression( //Presion de vapor a saturacion 
+            ' (0.75+0.00002*Z)*Ra', 
+            { 'Z'       : ElevaValue.select('elevation'),
+              'Ra'       : Ra.select('Ra_24h'),
+            })
+            .rename('Rso');   
+  var Rns = RsPM.expression( //Presion de vapor a saturacion 
+            '( 1-0.23)*Rs', 
+            { 'Rs'       : RsPM.select('Rs'),
+            })
+            .rename('Rns');   
+  var Rnl = RsPM.expression( //Presion de vapor a saturacion 
+            '0.000000004903*((Tmax+273.16)**4+(Tmin+273.16)**4)/2*(0.34-0.14*Ea**0.5)*(1.35*Rs/Rso-0.35)', 
+            { 'Rs'       : RsPM.select('Rs'),
+              'Tmax'       : Tmax.select('Temp'),
+              'Tmin'       : Tmin.select('Temp'),
+              'Ea'         : VPPM.select('VP'),
+              'Rso'         : Rso.select('Rso'),
+            })
+            .rename('Rnl'); 
+  var EToPM_ser = Rnl.expression( //Presion de vapor a saturacion 
+            '(0.408*(Rns-Rnl)*a+y*(900/(T+273))*u2*(es-ea))/(a+y*(1+0.34*u2))', 
+            { 'Rns'       : Rns.select('Rns'),
+              'Rnl'       : Rnl.select('Rnl'),
+              'a'         : a.select('a'),
+              'y'         : cs.select('cs'),
+              'T'         : Tmean.select('Temp'),
+              'u2'        : U2PM.select('u2'),
+              'es'        : Es.select('Es'),
+              'ea'        : VPPM.select('VP'),
+            })
+            .rename('ETo');   
+  return EToPM_ser;
+};
+
+//PM con RTMA
+exports.Rs_RTMA=function(RsPM2,DOI)
+{
+  var Ra = RadiacionExtraterrestre(RsPM2,DOI); //RS
+  var RsPM= Ra.expression( //Radiacion con Nubosidad
+            ' Ra*Rs', 
+            { 'Ra'       : Ra.select('Ra_24h'),
+              'Rs'       : RsPM2.select('Rs'),
+            })
+            .rename('Rs');
+  return RsPM;
+};
+
+//TEMPERATURA MEDIA
+exports.T_Media= function (Tmin, Tmax)
+{
+  var Ap =  Tmin.add(Tmax);
+  var TPRO = Ap.divide(ee.Number(2));
+  return TPRO;
+};
+
+//***************************************************************************************************************************************
+//FUNCIONES INTERNAS 
+//***************************************************************************************************************************************
+
+//funcion para estimar Radiación extraterrestre
+function RadiacionExtraterrestre (image, i) // EXTRATERRESTRIAL RADIATION
+{ 
+    var i_coord = image.addBands([ee.Image.pixelLonLat()]); //Coordenadas
+    var J=((ee.Number(i)).divide(365)).multiply(2*Math.PI); //
+    var dr = (ee.Number(J).cos()).multiply(0.033).add(1) ;//INVERSE RELATIVE DISTANCE EARTH-SUN   //ALLEN ET AL.(1998)
+    var s=(ee.Number(J.subtract(1.39)).sin()).multiply(0.409); //SOLAR DECLINATION [RADIANS]  //ASCE REPORT (2005)
+    var Ph = (i_coord.select('latitude').multiply(ee.Number(Math.PI))).divide(ee.Number(180));
+    var Ws = Ph.expression(
+            ' acos(- tan(lat)* tan(solar_dec))', 
+            { 'lat'       : Ph,
+              'solar_dec' : s   })
+            .rename('Ws');
+    var Ra_24h = Ws.expression(
+    '(24*60/pi) * Gcs * dr * ( (Ws * sin(PH)* sin(S)) +  (cos(PH) * cos(S) * sin(Ws)))',{
+      'pi'   : ee.Number(Math.PI),
+      'Gcs'  : ee.Number(0.0820),
+      'dr'   : dr, 
+      'Ws'   : Ws, 
+      'S'    : s, 
+      'PH'   : Ph}).rename('Ra_24h');
+  return Ra_24h;
+}
