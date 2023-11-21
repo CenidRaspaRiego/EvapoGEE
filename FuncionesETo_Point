@@ -1,0 +1,242 @@
+//FUNCIONES PARA CALCULAR LA ETO
+//********************************************************************************************************
+//FUNCIONES PARA EXPORTAR
+//********************************************************************************************************
+//funcion para determinar el dia juliano
+exports.JulianoFecha=function (fecha)
+{ 
+  var dateStr = ee.Date(fecha);
+  var doy = dateStr.getRelative('day', 'year');
+  return doy; 
+};
+exports.AFecha=function (fecha)
+{ 
+  var dateStr = ee.Date(fecha);
+  var doy = dateStr.getRelative('year','year');
+  return doy;
+};
+//Radiacion Extraterrestre 
+exports.RExtraterrestre=function  (i,lat) // EXTRATERRESTRIAL RADIATION
+{ 
+    var J=((ee.Number(i)).divide(365)).multiply(2*Math.PI);
+    var dr = (ee.Number(J).cos()).multiply(0.033).add(1) ;
+    var s=(ee.Number(J.subtract(1.39)).sin()).multiply(0.409);
+    var Ph =ee.Number(Math.PI*lat).divide(180);
+    var Ws1=(ee.Number(Ph).tan()).multiply(ee.Number(s).tan());
+    var Ws = ee.Number(Ws1.multiply(-1)).acos();
+    var Raf1=((ee.Number(Ph).sin()).multiply(ee.Number(s).sin())).multiply(Ws);
+    var Raf2=((ee.Number(Ph).cos()).multiply(ee.Number(s).cos())).multiply(ee.Number(Ws).sin());
+    var Raf3 = ee.Number(24*60*0.082).divide(Math.PI); 
+    var Raf4 =(Raf1).add(Raf2);
+    var Raf_f=(ee.Number(Raf3).multiply(dr)).multiply(Raf4);
+  return Raf_f;
+};
+exports.AtmosphericP=function (elevation)
+{
+  var Atm_1= (ee.Number(293).subtract(ee.Number(0.0065).multiply(elevation))).divide(293);
+  var Atm_2=((Atm_1).pow(5.26)).multiply(101.3);
+  return Atm_2;
+};
+//ETO CON HARGREAVES AND SAMANI
+exports.ETo_HS=function (Tmax,Tmin,Tmed, lat,doi, Kh_Value, Kt_value, Eh_Value)
+{
+  var Raf=RadiacionExtraterrestre(doi,lat);
+  var ETO_1=Tmax.subtract(Tmin).pow(Eh_Value);
+  var ETO_2=Tmed.add(Kt_value);
+  var ETO_3=ee.Number(0.408).multiply(Kh_Value).multiply(Raf).multiply(ETO_1).multiply(ETO_2);
+  return ETO_3;
+};
+//ETO CON HARGREAVES AND SAMANI
+exports.ETo_PM=function(TmaxPM, TminPM, TmeanPM,VPPM,RsPM,U2PM, Ra, ElevaValue, P)
+{
+  var a = SlopeSaturationVP(TmeanPM);
+  var cs = PsychrometricC(TmeanPM, P);
+  var Es = SaturationVaporP(TmaxPM, TminPM);
+  //var Ra = imp.RadiacionExtraterrestre(doi,lat); //RS
+  var Rso = ClearSkySR(ElevaValue, Ra);
+  var Rns = NetShortwaveR(ee.Number(0.23), RsPM);
+  var Rnl = Rnlarga(TmaxPM, TminPM, VPPM, RsPM, Rso);
+  var Rn = Rns.subtract(Rnl);
+  var RT = RadiationTerm(a, cs, U2PM, Rn);
+  var ATs = AdvectionTerm(a, cs,U2PM, TmeanPM, Es, VPPM);
+  var EToPM_ser = RT.add(ATs);
+  return EToPM_ser;
+};
+
+//TEMPERATURA MEDIA
+exports.T_Media= function (Tmin, Tmax)
+{
+  var Ap =  Tmin.add(Tmax);
+  var TPRO = Ap.divide(ee.Number(2));
+  return TPRO;
+};
+
+//***************************************************************************************************************************************
+//FUNCIONES INTERNAS 
+//***************************************************************************************************************************************
+//funcion para estimar Radiación extraterrestre
+function RadiacionExtraterrestre (i,lat) // EXTRATERRESTRIAL RADIATION
+{ 
+    var J=((ee.Number(i)).divide(365)).multiply(2*Math.PI);
+    var dr = (ee.Number(J).cos()).multiply(0.033).add(1) ;
+    var s=(ee.Number(J.subtract(1.39)).sin()).multiply(0.409);
+    var Ph =ee.Number(Math.PI*lat).divide(180);
+    var Ws1=(ee.Number(Ph).tan()).multiply(ee.Number(s).tan());
+    var Ws = ee.Number(Ws1.multiply(-1)).acos();
+    var Raf1=((ee.Number(Ph).sin()).multiply(ee.Number(s).sin())).multiply(Ws);
+    var Raf2=((ee.Number(Ph).cos()).multiply(ee.Number(s).cos())).multiply(ee.Number(Ws).sin());
+    var Raf3 = ee.Number(24*60*0.082).divide(Math.PI); 
+    var Raf4 =(Raf1).add(Raf2);
+    var Raf_f=(ee.Number(Raf3).multiply(dr)).multiply(Raf4);
+  return Raf_f;
+}
+
+//funcion para la pendiente de saturacion
+function SlopeSaturationVP (Tmean)
+{
+  var SlopeS_0=(ee.Number(Tmean)).add(237.3);
+  var SlopeS_1=((ee.Number(Tmean)).multiply(17.27)).divide(SlopeS_0);
+  var SlopeS_2=(ee.Number(0.6108*4098).multiply((SlopeS_1).exp())).divide((SlopeS_0).pow(2));
+  return SlopeS_2;
+}
+
+//Funcion para la PRESION ATMOSFERICA
+function AtmosphericP (elevation)
+{
+  var Atm_1= (ee.Number(293).subtract(ee.Number(0.0065).multiply(elevation))).divide(293);
+  var Atm_2=((Atm_1).pow(5.26)).multiply(101.3);
+  return Atm_2;
+}
+
+//CONSTANTE PSICOMETRICA
+function PsychrometricC (Tmean, AtmosfericP)
+{
+  var LVapor = ee.Number(2.501).subtract(ee.Number(2.361 * 0.001).multiply(Tmean));
+  var Psy_1=LVapor.multiply(0.622);
+  var Psy_2= (ee.Number(1.013 * 0.001).multiply(AtmosfericP)).divide(Psy_1);
+  return Psy_2;
+}
+//SaturationVaporP
+function SaturationVaporP (Tmax, Tmin)
+{
+  var SVP_1=((ee.Number(Tmax)).multiply(17.27)).divide(ee.Number(Tmax).add(237.3));
+  var SVP_2=ee.Number(0.6108).multiply((SVP_1).exp());
+  var SVP_3=((ee.Number(Tmin)).multiply(17.27)).divide(ee.Number(Tmin).add(237.3));
+  var SVP_4=ee.Number(0.6108).multiply((SVP_3).exp());
+  var SVP= (SVP_2.add(SVP_4)).divide(2);
+  return SVP;
+}
+//ClearSkySR
+function ClearSkySR (Ele, Ra)
+{
+  var SC_1= (ee.Number(0.75).add(ee.Number(0.00002).multiply(Ele))).multiply(Ra);
+  return SC_1;
+}
+//NetShortwaveR
+function NetShortwaveR (a, Rs)
+{ 
+  var NS_1=(ee.Number(1).subtract(a)).multiply(Rs);
+  return NS_1;
+}
+//Rnlarga
+function Rnlarga (Tmax, Tmin, Ea, Rs, Rso)
+{ 
+  var Sb = ee.Number(4.903).multiply(ee.Number(10).pow(-9));
+  var Tmk4 = ((Tmax).add(ee.Number(273.16))).pow(4);
+  var Tmink4 =((Tmin).add(ee.Number(273.16))).pow(4);
+  var a1 = (Sb.multiply(Tmk4.add(Tmink4))).divide(2);
+  var a2 = ee.Number(0.34).subtract(ee.Number(0.14).multiply((Ea).pow(0.5)));
+  var a3 = ((ee.Number(1.35).multiply(Rs)).divide(Rso)).subtract(0.35);
+  var RnL = (a1).multiply(a2).multiply(a3);
+  return RnL;
+}
+//RadiationTerm
+function RadiationTerm (slope, cs, Velocity, Rn)
+{
+  var Apoyo = (slope).add(cs.multiply(ee.Number(1).add(ee.Number(0.34).multiply(Velocity))));
+  var RT = (ee.Number(0.408).multiply(slope).multiply(Rn.subtract(0))).divide(Apoyo);
+  return RT;
+}
+//AdvectionTerm
+function AdvectionTerm (slope, cs, Velocity, T, Es, Ea)
+{
+  var Ap =  (slope).add(cs.multiply(ee.Number(1).add(ee.Number(0.34).multiply(Velocity))));
+  var AdTerm = (cs.multiply(ee.Number(900).divide(T.add(ee.Number(273)))).multiply(Velocity).multiply(Es.subtract(Ea))).divide(Ap);
+  return AdTerm;
+}
+
+
+
+
+
+exports.HS = function(image,KH,EH,KT) {
+
+    var dateStr = ee.Date(image.get('system:time_start'));
+    var doy = dateStr.getRelative('day', 'year');
+   
+    //INVERSE RELATIVE DISTANCE EARTH-SUN
+    //ALLEN ET AL.(1998)
+    var d1 =  ee.Number(2).multiply(Math.PI).divide(ee.Number(365));
+    var d2 = d1.multiply(doy);
+    var d3 = d2.cos();
+    var dr = ee.Number(1).add(ee.Number(0.033).multiply(d3));
+  
+    //SOLAR DECLINATION [RADIANS]
+    //ASCE REPORT (2005)
+    var e1 =  ee.Number(2).multiply(Math.PI).multiply(doy);
+    var e2 = e1.divide(ee.Number(365));
+    var e3 = e2.subtract(ee.Number(1.39));
+    var e4 = e3.sin();
+    var solar_dec = ee.Number(0.409).multiply(e4);
+  
+    //GET COORDINATES
+    var i_Rn24_coord = image.select('Tmax').sum().addBands([ee.Image.pixelLonLat()]);
+    
+    //SUNSET  HOUR ANGLE [RADIANS]
+    //ASCE REPORT (2005)    
+    var i_lat_rad = (i_Rn24_coord.select('latitude').multiply(ee.Number(Math.PI))).divide(ee.Number(180));
+    var i_sun_hour = i_lat_rad.expression(
+    ' acos(- tan(lat)* tan(solar_dec))', {
+      'lat' : i_lat_rad,
+      'solar_dec' : solar_dec}).rename('sun_hour');
+  
+    //SOLAR CONSTANT
+    var gsc = ee.Number(4.92); //[MJ M-2 H-1] 
+  
+    //EXTRATERRESTRIAL RADIATION 24H  [MJ M-2 D-1]
+    //ASCE REPORT (2005)
+    var i_Ra_24h = i_sun_hour.expression(
+    '(24/pi) * Gcs * dr * ( (omega * sin(lat_rad)* sin(solar_dec)) +  (cos(lat_rad) * cos(solar_dec) * sin(omega))) * 11.5740',{
+      'pi' : ee.Number(Math.PI),
+      'Gcs' : gsc,
+      'dr': dr, 
+      'omega': i_sun_hour, 
+      'solar_dec': solar_dec, 
+      'lat_rad': i_lat_rad}).rename('Ra_24h');
+    
+
+     var ET = i_sun_hour.expression(
+    '0.408*Kh*Ra*(Tmax-Tmin)^(Eh)*(Tmean+Kt)',{
+      'Kh' :KH,
+      'Ra' :i_Ra_24h ,
+      'Tmax': image.select('Tmax'), 
+      'Tmin': image.select('Tmin'), 
+      'Tmean': image.select('Tmean'),  
+      'Eh': EH,
+      'Kt': KT,
+    }).rename('Ra_24h');
+      
+return ET
+  
+};
+
+
+exports.current_position=function (point) {
+  Map.addLayer(point);
+  Map.centerObject(point, 14);
+  print(point);
+}
+
+exports.oops=function (error) {
+  print(error);
+}
