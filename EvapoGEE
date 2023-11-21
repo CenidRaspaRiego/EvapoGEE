@@ -1,0 +1,1168 @@
+/*  
+The EvapoGEE calculation options are: Calculation of daily ET0 with: 
+i) FAO-56 Penman Monteith, and 
+ii) Hargreaves and Samani method; and display of variables with daily resolution: 
+iii) mean temperature, 
+iv) actual vapor pressure (ea), 
+v) solar radiation (Rs) and 
+vi) wind speed at 2 meters (u2). 
+EvapoGEE estimates, displays maps and time series.
+
+INIFAP CENID-RASPA 2022
+Sergio Iván Jiménez Jiménez et al. 
+jimenez.sergio@inifap.gob.mx
+*/
+//=======================================================*****************************************************************************
+//Drawing Tools
+//=======================================================
+var drawingTools = Map.drawingTools();
+Map.drawingTools().setLinked(false);
+var debug = ui.url.get('debug', true);
+//===============================================================*************************************************************
+// Se importa Archivo de Funciones Y STYLE
+//===============================================================
+var table = ee.FeatureCollection("users/InifapCenidRaspa/Mexico");
+var elevation = ee.Image('USGS/SRTMGL1_003');  
+var imp = require('users/serchjimenez1990/ReanalysisETO:FuncionesETo_Point');
+var imp2 = require('users/serchjimenez1990/ReanalysisETO:ReanalysisDataset');
+var imp_P = require('users/serchjimenez1990/ReanalysisETO:FuncionesETo_Pol');
+var St = require('users/serchjimenez1990/ReanalysisETO:StyleE');
+var Box = require('users/serchjimenez1990/ReanalysisETO:DialogBox');
+var geometry = /* color: #d63000 */ee.Geometry.Point([-104.2013895, 25.389361]);
+
+//Some functions ********************************************************
+function TMedia(image) //Convertir a Temeperatura media
+{  
+    var TemC = image.expression(
+        '((Tmax-273.13)+(Tmin-273.13))/2',
+        {
+          'Tmax': image.select('Tmax'),
+          'Tmin': image.select('Tmin'),
+        })
+        .rename('Temp')
+        .copyProperties(image, ["system:time_start", 'fecha', 'DOI']);
+        return TemC;
+}
+ function getURLIMAGE (image, indice, Fecha,recorte, escala){ 
+    var recorte2=(image.clip(recorte.geometry()));
+    var NameMap=(ee.String('Variable_'+indice +'-'+ Fecha));
+    var NameDownload=NameMap.getInfo();
+    var downloadUrl = ((recorte2))
+                    .getDownloadURL({ 
+                      name: NameDownload,
+                      scale: escala});
+    return downloadUrl;
+}
+function getVectorFile (recorte){ 
+    var srr=ee.FeatureCollection(recorte);
+    var downloadUrl = srr
+                    .getDownloadURL({ 
+                      format:'kml',
+                      filename: 'Polygons'});
+    return downloadUrl;
+}
+// ===============================================================================**************************************************************
+// 3. PANEL DE NAVEGACION - TEXTO DE PRESENTACIÓN
+// ===============================================================================
+// Crea panel de controles
+var panel = ui.Panel({style: {width: '365px'}});
+var pangr = ui.Panel({style: {position: 'bottom-right', width: '470px', padding:'4px'}});
+var ImgButton = ui.Button({ //boton para ubicación del usuario
+  label: 'Get Current Position',
+  imageUrl: St.IconName('my_location'),
+  onClick: function(){ui.util.getCurrentPosition(imp.current_position,imp.Error)}
+});
+// Agrega elementos al panel
+var Version= ui.Label({value: 'V 1.0-last update: November 2023', style: St.version});
+var ButtonFAQ = ui.Button({label: 'How to use this tool?', style: St.ButtonPrincipal_i, imageUrl: St.IconName('contact_support'), onClick: function(){Map.add(Box.FAQ_PANEL)}});
+var ButtonAboutEVAPO  = ui.Button({label: 'About EvapoGEE', style: St.ButtonAbout_i, imageUrl: St.IconName('info'), onClick: function(){Map.add(Box.ABOUT_PANEL)}});
+var Panels_Button= ui.Panel({
+   layout: ui.Panel.Layout.flow('horizontal'),
+   widgets: [Version, ButtonFAQ,ButtonAboutEVAPO]
+});
+
+var contact = ui.Label({value: 'Contact - jimenez.sergio@inifap.gob.mx', style: {fontSize: '12px', textAlign: 'center',padding: '5px 5px', margin: 'auto'}});
+//Botones de ayuda=======================================
+var DatosHelp_Button = ui.Button({
+  label: '?',
+  style: St.HelpGeneral,
+  onClick: function(){Map.add(Box.DATOS_EVAPO_Panel)}
+});
+var CalculoHelp_Button = ui.Button({
+  label: '?',
+  style: St.HelpGeneral,
+  onClick: function(){Map.add(Box.CALCULOS_EVAPO_Panel)}
+});
+var PointHelp_Button = ui.Button({
+  label: '?',
+  style: St.HelpGeneral,
+  onClick: function(){Map.add(Box.POL_PANEL)}
+});
+var TimeZone_Button = ui.Button({
+  label: '?',
+  style: St.HelpGeneral,
+  onClick: function(){Map.add(Box.TIME_PANEL)}
+});
+
+//Botones de cerrar================================================================================================================  
+var CloseButton = ui.Button({label: 'Close',style: St.closeButton, onClick: function(){Map.remove(Box.FAQ_PANEL);}});
+var CloseButtonEVAPO = ui.Button({label: 'Close',style: St.closeButton, onClick: function(){Map.remove(Box.ABOUT_PANEL);}});
+var CloseButtonDATOS = ui.Button({label: 'Close',style: St.closeButton, onClick: function(){Map.remove(Box.DATOS_EVAPO_Panel);}});
+var CloseButtonCALCULOS = ui.Button({label: 'Cerrar',style: St.closeButton, onClick: function(){Map.remove(Box.CALCULOS_EVAPO_Panel);}});
+var CloseButtonTIME = ui.Button({label: 'Cerrar',style: St.closeButton, onClick: function(){Map.remove(Box.TIME_PANEL);}});
+var CloseButtonPOL = ui.Button({label: 'Cerrar',style: St.closeButton, onClick: function(){Map.remove(Box.POL_PANEL);}});
+panel.add(Panels_Button);
+panel.add( ui.Label({value: 'EvapoGEE: Reference evapotranspiration', style: St.titleAPP}));
+panel.add(contact);
+Box.FAQ_PANEL.add(CloseButton);
+Box.ABOUT_PANEL.add(CloseButtonEVAPO);
+Box.DATOS_EVAPO_Panel.add(CloseButtonDATOS);
+Box.CALCULOS_EVAPO_Panel.add(CloseButtonCALCULOS);
+Box.TIME_PANEL.add(CloseButtonTIME);
+Box.POL_PANEL.add(CloseButtonPOL);
+// ===============================================================================**********************************************************
+// 5. PANEL DE NAVEGACION-SELECCION DE OPCIONES
+// ===============================================================================********************************************************
+// 5.1. Agrega panel con dos etiquetas para la fecha inicial y final y los cuadros de texto=============
+var Box_Data= ui.Panel({
+  layout: ui.Panel.Layout.flow('vertical'),
+  style: {backgroundColor: "#939693", color: "#ffffff", margin: '2px 5px'},//border: '0.5px solid #000000' 
+  widgets:
+          [ui.Label({ value:'1. Data range (format: yyyy-mm-dd)', style: St.styleWiget}),]
+});
+var fechaHoy1=ee.Date(Date.now()).advance(-2, 'day');
+var fechaHoy=ee.String(fechaHoy1.get('year')).cat('-').cat(fechaHoy1.format('MM')).cat('-').cat(fechaHoy1.format('dd'))
+var fechaHoy2=ee.Date(Date.now()).advance(-4, 'week');
+var fechaHoy2=ee.String(fechaHoy2.get('year')).cat('-').cat(fechaHoy2.format('MM')).cat('-').cat(fechaHoy2.format('dd'))
+var fechain = ui.Textbox({
+  placeholder: 'YYYY-MM-DD', 
+  value: fechaHoy2.getInfo(),
+  style: {maxWidth: '140px'}});
+var fechafin = ui.Textbox({
+  placeholder: 'YYYY-MM-DD', 
+  value: fechaHoy.getInfo(),
+  style: {maxWidth: '140px'}});
+panel.add(Box_Data);
+panel.add(ui.Panel([fechain,fechafin], ui.Panel.Layout.flow('horizontal')));
+
+//5.2 Selección de datos de reanalisis===================================
+var Meteorological_data = ui.Select({ 
+ items: [ 
+   { label:"1. GLDAS: Global Land Data Assimilation System",        value: 0},
+   { label:"2. NLDAS: North American Land Data Assimilation S.",    value: 1}, 
+   { label:"3. CFSv2: NCEP Climate Forecast System Version 2",      value: 2}, 
+   { label:'4. RTMA: Real-Time Mesoscale Analysis',                 value: 3},
+   //{ label:'5. NP: Nasa-Power system',                               value: 5},
+   //{ label:'5. Smallest error (RMSE): Nazas-Aguanaval HR',          value: 4}
+ ], 
+ value: 0,
+ style:{color:'#000000'},
+});
+//zona horaria
+var Timezone_data = ui.Select({ 
+ items: [ 
+    { label:'Etc/GMT-0',       value: +1},
+    { label:'Etc/GMT+1',       value: +2},
+    { label:'Etc/GMT+2',       value: +3},
+    { label:'Etc/GMT+3',       value: +4},
+    { label:'Etc/GMT+4',       value: +5},
+    { label:'Etc/GMT+5',       value: +6},
+    { label:'Etc/GMT+6',       value: +7},
+    { label:'Etc/GMT+7',       value: +8},
+    { label:'Etc/GMT+8',       value: +9},
+ ], 
+ value: 6,
+ style:{color:'#000000', position: 'top-center',margin: 'auto', width: '46%'},
+});
+var TextoZH= ui.Label({value:'Time zone:'});
+var Box_Meteorological= ui.Panel({
+  layout: ui.Panel.Layout.flow('vertical'),
+  style: {backgroundColor: "#969c96", color: "#ffffff", margin: '2px 5px'},//border: '0.5px solid #000000' 
+  widgets:
+          [ui.Label({ value:'2. Reanalysis dataset', style: St.styleWiget}),
+            ui.Panel({
+              layout:ui.Panel.Layout.flow("horizontal"), 
+              style: {position: 'top-center',margin: 'auto', width: '100%'},
+              widgets: [ui.Panel({ layout: ui.Panel.Layout.flow("horizontal"), 
+              style: {position: 'top-center', margin: 'auto'},
+              widgets: [
+                      Meteorological_data,DatosHelp_Button]})]
+            })
+          ]
+});
+var value_Timezone= ui.Panel({
+   layout: ui.Panel.Layout.flow('horizontal'),
+   widgets: [TextoZH,Timezone_data, TimeZone_Button]
+});
+panel.add(Box_Meteorological);
+panel.add(value_Timezone);
+
+// 5.3. Agrega selector de metodo ====================================
+var indiceT= ui.Panel({
+  layout: ui.Panel.Layout.flow('vertical'),
+  style: {backgroundColor: "#939693", color: "#ffffff", margin: '2px 5px'},//border: '0.5px solid #000000' 
+  widgets:
+          [ui.Label({ value:'3. ETo method or Variable', style: St.styleWiget}),]
+});
+var indice = ui.Select({
+  items:[
+    { label:"1. ET0: FAO56-Penman Monteith",          value: 0},
+    { label:'2. ET0: Hargreaves and Samani',          value: 1},  
+    { label:'3. Variable: Temperature at 2m',         value: 3},
+    { label:'4. Variable: Vapor pressure at 2m',      value: 4},
+    { label:'5. Variable: Solar Radiation',           value: 5},
+    { label:'6. Variable: Wind speed at 2m',          value: 6}
+  ],
+  placeholder : 'Selecciona un método',
+  value: 0,
+  onChange: function(value) {
+      if (value == 1) {
+        Box_ConfHS.style().set('shown', true);
+        value_ConfHS.style().set('shown', true);
+        Box_ConfGDD.style().set('shown', false);
+        value_ConfGDD.style().set('shown', false);
+        PrT.style().set('shown', false);
+      }
+      else if (value === 0) {
+        Box_ConfGDD.style().set('shown', false);
+        value_ConfGDD.style().set('shown', false);
+        Box_ConfHS.style().set('shown', false);
+        value_ConfHS.style().set('shown', false);
+        PrT.style().set('shown', false);
+      }
+      else {
+        Box_ConfHS.style().set('shown', false);
+        value_ConfHS.style().set('shown', false);
+        Box_ConfGDD.style().set('shown', false);
+        value_ConfGDD.style().set('shown', false);
+        PrT.style().set('shown', true);        
+      }
+    },
+  style: {position: 'top-center',margin: 'auto', width: '70%'},
+});
+var IndiceHelp= ui.Panel({
+      layout: ui.Panel.Layout.flow("horizontal"),
+      style: {position: 'top-center'},
+      widgets: [indice,CalculoHelp_Button]
+});
+var TextoPoint= ui.Label({value:'Calculate at:', style: {maxWidth: '100px'}});
+var titulo = ui.Label({value:'Draw the polygons using the drawing tools', style:{color:'red', position:'bottom-center'}});
+Map.add(titulo);
+    titulo.style().set('shown', false);
+var Point_data = ui.Select({ 
+  items: [ 
+   { label:"1. a Point, or",     value: 0},
+   { label:"2. polygon",        value: 1},
+  ], 
+  value: 0,
+  style:{color:'#000000', position: 'top-center',margin: 'auto', width: '44%'},
+  
+  onChange: function(value) {
+      if (value == 1) {
+            drawingTools.setDrawModes(['polygon']);
+            titulo.style().set('shown', true);
+            Map.setControlVisibility(true, true, false, true, true, true, true);
+            VectorFileUse.style().set('shown', true);
+            value_VF.style().set('shown', false);
+            Pr.setLabel('Show monthly data')
+            PrH.setLabel('Show daily data')
+      }
+      else {
+            Map.setControlVisibility(true, true, false, true, true, true, false);
+            titulo.style().set('shown', false);
+            Map.style().set('cursor', 'crosshair');
+            VectorFileUse.style().set('shown',false);
+            value_VF.style().set('shown', false);
+            Pr.setLabel('Show Hourly Data')
+            PrH.style().set('shown', false);
+      }
+    },
+});
+var value_Point= ui.Panel({
+   layout: ui.Panel.Layout.flow('horizontal'),
+   widgets: [TextoPoint,Point_data,PointHelp_Button ]
+});
+
+var VectorFileUse=ui.Checkbox({
+  label:'Use vector file from GEE',
+  value: false,
+  style: {color: '#dc7a55', width: '200px'},
+  onChange: function(value) {
+    if (value === true) { //es para el ARVI
+        value_VF.style().set('shown', true);
+    }
+    else if  (value === false) { //es para el ATSAVI
+        value_VF.style().set('shown', false);
+    }
+  }
+});
+var VF_text= ui.Label({value: 'URL GEE (Table ID):', style: St.styleTexTConf});
+var VF_in= ui.Textbox({placeholder: 'users/InifapCenidRaspa/CuencaNA', value: 'users/InifapCenidRaspa/CuencaNA', style: {maxWidth: '200px'}});
+var value_VF= ui.Panel({
+   layout: ui.Panel.Layout.flow('horizontal'),
+   style: {backgroundColor: "#eceaea", margin: '2px 5px'},
+   widgets: [VF_text,VF_in]
+});
+
+panel.add(indiceT);
+panel.add(IndiceHelp);
+panel.add(value_Point);
+
+// --------------------------------------------------------        
+// 5.3. Para configurar informacíon de Hargeaves and samani
+//--------------------------------------------------------
+var Box_ConfHS= ui.Panel({
+  layout: ui.Panel.Layout.flow('vertical'),
+  style: {backgroundColor: "#2c8aaf", color: "#ffffff", margin: '2px 5px'},//border: '0.5px solid #000000' 
+  widgets:
+          [ui.Label({ value:'Configuration: Hargreaves and Samani equation', style: St.styleConf }),]
+});
+var kh_text= ui.Label({value: 'Kh:', style: St.styleTexTConf});
+var kh_in= ui.Textbox({placeholder: '0.0023', value: '0.0023', style: {maxWidth: '70px'} });
+var eh_text= ui.Label({value: 'eH:', style: St.styleTexTConf});
+var eh_in= ui.Textbox({placeholder: '0.5', value: '0.5', style: {maxWidth: '70px'}});
+var kt_text= ui.Label({value: 'Kt:',style: St.styleTexTConf}); 
+var kt_in= ui.Textbox({placeholder: '17.8', value: '17.8',style: {maxWidth: '70px'}});     
+var value_ConfHS= ui.Panel({
+   layout: ui.Panel.Layout.flow('horizontal'),
+   style: {backgroundColor: "#eceaea", margin: '2px 5px'},
+   widgets: [kh_text,kh_in,eh_text, eh_in,kt_text,kt_in]
+});
+
+//--------------------------------------------
+// 5.3. Para configurar informacíon de GDD
+//--------------------------------------------
+var Box_ConfGDD= ui.Panel({
+  layout: ui.Panel.Layout.flow('vertical'),
+  style: {backgroundColor: "#2c8aaf", color: "#ffffff", margin: '2px 5px'},//border: '0.5px solid #000000' 
+  widgets:
+          [ui.Label({ value:'Configuración GDD en °C', style: St.styleConf}),]
+});
+var TbaseText= ui.Label({value: 'T. Base', style: St.styleTexTConf});
+var Tbasein=ui.Textbox({placeholder: '10', value: '10', style: {maxWidth: '100px'}});
+var Tmaxtext= ui.Label({value: 'T. Máx', style: St.styleTexTConf});
+var Tmaxin= ui.Textbox({placeholder: '30', value: '30', style: {maxWidth: '70px'}});
+var value_ConfGDD= ui.Panel({
+   layout: ui.Panel.Layout.flow('horizontal'),
+   widgets: [TbaseText,Tbasein,Tmaxtext, Tmaxin ]
+});
+
+//5.4 --------------------------OPTIONAL====================
+var OptionT= ui.Panel({
+  layout: ui.Panel.Layout.flow('vertical'),
+  style: St.styleDatWiget,//border: '0.5px solid #000000' 
+  widgets:
+          [ui.Label({ value:'Optional configuration', style: St.styleWiget}),]
+}); 
+var Pr=ui.Checkbox({label:'Show Hourly Data',value: false,style: {color: '#dc7a55', width: '270px'}});
+var PrH=ui.Checkbox({label:'Show daily data',value: false,style: {color: '#dc7a55', width: '270px'}});
+var PrT= ui.Panel({
+      layout: ui.Panel.Layout.flow("vertical"),
+      style: {position: 'top-center'},
+      widgets: [Pr,PrH]
+  });  
+var PrCor=ui.Checkbox({label:'correct daily data for the region',value: false,style: {color: '#dc7a55', width: '270px'}});
+var PrCor= ui.Panel({
+      layout: ui.Panel.Layout.flow("horizontal"),
+      style: {position: 'top-center'},
+      widgets: [PrCor]
+  }); 
+//Descarga de mapas
+var DownloadC1_Button = ui.Label({value:"⇓", style: St.ButonDonwload});
+var DownloadC3_Button = ui.Label({value:"⇓", style:St.ButonDonwload});
+var DownloadC2_Button = ui.Label({value:"⇓", style:St.ButonDonwload});
+
+var downloadVFile= ui.Panel({
+      layout: ui.Panel.Layout.flow("horizontal"),
+      style: {backgroundColor: "#eceaea", position: 'top-center',shown: true},
+      widgets: [ui.Label('download vector file',{backgroundColor: "#eceaea", color: '#615b58',width: '270px'}),DownloadC2_Button]
+  });
+var downloadIV= ui.Panel({
+      layout: ui.Panel.Layout.flow("horizontal"),
+      style: {backgroundColor: "#eceaea", position: 'top-center',shown: true},
+      widgets: [ui.Label('download variable map',{backgroundColor: "#eceaea", color: '#615b58',width: '270px'}),DownloadC1_Button]
+  });
+
+
+
+panel.add(Box_ConfHS);
+panel.add(value_ConfHS);
+panel.add(Box_ConfGDD);
+panel.add(value_ConfGDD);
+panel.add(OptionT)
+panel.add(VectorFileUse);
+panel.add(value_VF);
+value_VF.style().set('shown', false);
+VectorFileUse.style().set('shown', false);
+panel.add(PrT);
+//panel.add(PrCor);
+Box_ConfHS.style().set('shown', false);
+value_ConfHS.style().set('shown', false);
+Box_ConfGDD.style().set('shown', false);
+value_ConfGDD.style().set('shown', false);
+PrT.style().set('shown', false);
+panel.add(downloadIV);
+panel.add(downloadVFile);
+downloadVFile.style().set('shown', false);
+downloadIV.style().set('shown', false);
+//==========================================
+//BOTONES DE CALCULAR
+//=========================================
+// 5.4. Crea botón para procesar la configuración, con la función de llamada Procesa y lo agrega al panel principal
+var proc = ui.Button('Accept', Procesa, false, {margin: 'auto', padding: '10px', width: '110px', fontSize: '15px'});
+var proc2 = ui.Button('New polygon', Nuevo, false, {margin: 'auto', padding: '5px', width: '110px', fontSize: '15px'});
+var proc3 = ui.Button('Edit polygon', Edita, false, {margin: 'auto', padding: '5px', width: '110px', fontSize: '15px'});
+proc3.setDisabled(true);
+proc2.setDisabled(true);
+var procHelp= ui.Panel({
+      layout: ui.Panel.Layout.flow("horizontal"), 
+      style: {position: 'top-center'},
+      widgets: [proc2,proc3,proc]
+  });
+panel.add(procHelp);
+//========================**********************************************************************************
+
+// ===============================================================================***********************************************************************
+// 6. LAMADA DE FUNCIONES
+// ===============================================================================**************************************************************
+function Nuevo()//=============================================================********************************************************
+{
+  Map.clear(); 
+  Map.add(ImgButton)
+  drawingTools.clear();
+  proc3.setDisabled(true)
+  Map.setCenter(-101.59, 24.10, 6);
+  var inifap_leyend = ui.Label('INIFAP');
+  inifap_leyend.style().set('position', 'bottom-left');
+  inifap_leyend.setUrl('https://www.gob.mx/inifap');
+  Map.add(inifap_leyend);
+ Map.style().set('cursor', 'hand');
+}
+function Edita()//****************************************************************************************************************
+{
+  Map.clear(); 
+  Map.drawingTools().layers().forEach(function(layer) {
+    layer.setShown(true);
+  });
+  var inifap_leyend = ui.Label('INIFAP');
+  inifap_leyend.style().set('position', 'bottom-left');
+  inifap_leyend.setUrl('https://www.gob.mx/inifap');
+  
+  Map.add(inifap_leyend);
+ Map.style().set('cursor', 'hand');
+}
+function Procesa()//**************************************************************************************************************
+{
+  
+  var fecha1;
+  var fecha2;
+  var panel1 = ui.Panel([], ui.Panel.Layout.Flow('vertical'),{position:'top-right'});
+  //Variables a ocupar
+  var fecha = [];
+  var temperature;
+  var Rs;
+  var VP;
+  var u2;
+  var ResolutionDB; 
+  var Presion
+  //Fechas 
+  var TZ=Timezone_data.getValue(); //Seleccion de zona horaria
+  fecha1 = fechain.getValue();
+  fecha2 = fechafin.getValue();
+  fecha.push(fecha1); 
+  fecha.push(fecha2);
+  var indSel = indice.getValue(); //Seleccion de Metodo o variable
+  var MetData=Meteorological_data.getValue(); //seleccion de conjunto de datos
+  //valores de HS ecuation
+  var Kh_Value=parseFloat(kh_in.getValue());
+  var Eh_Value=parseFloat(eh_in.getValue());
+  var Kt_value=parseFloat(kt_in.getValue());
+  var Hd_Response=Pr.getValue(); //Respuesta de datos horarios o no
+  var HdH_Response=PrH.getValue(); //Respuesta de datos mensuales historicos
+  var Point_Response=Point_data.getValue();//REspuesta de si quiere punto o poligono
+  var VF_Response=VectorFileUse.getValue(); //Respuesta de la url del archivo vector
+  //Se manda a llamar conjunto de datos
+  var dataset=imp2.ColeccionRTMA(fecha, TZ); //RTMA
+  var dataset2=imp2.ColeccionCFSv2(fecha, TZ); //CFSv2
+  var dataset3=imp2.ColeccionNLDAS(fecha, TZ); //NLDAS
+  var dataset4=imp2.ColeccionGLDAS(fecha, TZ); //GLDAS
+  //Se filtra las variables segun el conjunto de datos seleccionado y se lleva acabo la conversion de variables 
+  if (MetData==4) { // Mejor combinación comarca [Tempetura: RTMA; Rs: NLDAS; VP: RTMA; u2, CFSv2]
+     temperature = dataset.select('Temp');
+     Rs=dataset3.map(imp2.Rs_S);
+     VP=dataset.map(imp2.VP_S);
+     u2=dataset2.map(imp2.u2_S);  
+     Presion= dataset.select('P');
+     ResolutionDB= 1000;
+  }
+  else if (MetData===0){ // GLDAS
+     temperature = dataset4.map(imp2.Temp_C);
+     Rs=dataset4.map(imp2.Rs_GLDAS);
+     VP=dataset4.map(imp2.VP_SH);
+     u2=dataset4.map(imp2.u2_Sv); 
+     Presion= dataset4.select('P');
+     ResolutionDB=27830;
+  }
+  else if (MetData==1) { // NLDAS
+     temperature = dataset3.select('Temp');
+     Rs=dataset3.map(imp2.Rs_S);
+     VP=dataset3.map(imp2.VP_SH);
+     u2=dataset3.map(imp2.u2_S);  
+     Presion= dataset3.select('P');
+     ResolutionDB=13915;
+  }
+  else if (MetData==2) { // CFSv2
+     var temperatureMin = dataset2.map(imp2.Temp_CMin);
+     var temperatureMax = dataset2.map(imp2.Temp_CMax);
+     Rs=dataset2.map(imp2.Rs_CFSV2);
+     VP=dataset2.map(imp2.VP_SH);
+     u2=dataset2.map(imp2.u2_S);   
+     Presion= dataset2.select('P');
+     ResolutionDB=22264;
+  }
+  else if (MetData==3) { //RTMA
+     temperature = dataset.select('Temp');
+     Rs=dataset.map(imp2.Rs_S2);
+     VP=dataset.map(imp2.VP_S);
+     u2=dataset.map(imp2.u2_S);  
+     Presion= dataset.select('P');
+     ResolutionDB=2500;
+  }
+
+  if (Point_Response===0) {
+        Map.clear(); 
+        Map.setControlVisibility(true, true, false, true, true, true, false); //Se oculta el Drwing tools
+        var titulo = ui.Label('Click on the map to Estimate Reference Evapotranspiration');
+        Map.style().set('cursor', 'crosshair');
+        titulo.style().set('position', 'top-center');
+        Map.add(titulo);
+        //Map.addLayer(geometry)
+        proc2.setDisabled(false) //Se desactiva el boton de NewPolygon
+        proc3.setDisabled(false) //Se desactiva el boton de EditPolygon
+        downloadIV.style().set('shown', true);
+        downloadVFile.style().set('shown', true);
+        Map.onClick(function(coords) //Cuando el usuario da clic se muestra la evolucion de la variable
+        {
+          var point = ee.Geometry.Point(coords.lon, coords.lat);
+          var dot = ui.Map.Layer(point, {color: 'FF0000'},'point');
+          Map.layers().set(0, dot);
+          var pointInf = ee.FeatureCollection(point.buffer(10000));
+          //Map.addLayer(pointInf);
+          pangr.style().set('shown', true);
+          var Eleva = elevation.reduceRegion({
+                    reducer: ee.Reducer.mean(),
+                    geometry: point,
+                    scale: 10
+          });
+          var ElevaValue = Eleva.get('elevation');//Determina la elevación en base al modelo digital de 
+          var P=  imp.AtmosphericP(ElevaValue); // Presion Atmosferica para el punto que indica el usuario
+          var prueba1; //Variable para almacenar los dias Julianos
+          //------------------------------------------------------------------------
+          //COMENZAMOS A IMPORTAR LOS DATOS DE LAS VARIABLES PARA EXTRAERLO POR DOI
+          //-------------------------------------------------------------
+          if (MetData==2) { //Para el Conjunto de Datos CFSv2
+                  var mappedTmin = temperatureMin.map(function(image){
+                    var sergio=image.clip(pointInf.geometry())
+                      var value = sergio.reduceRegion(ee.Reducer.mean(), point, 100)
+                      return image.set('Tmin', value.get('Tmin')).set('DOY', image.get('DOI')).set('system:time_start',image.get('system:time_start')).clip(pointInf);
+                  });  
+                  var mappedTmax = temperatureMax.map(function(image){
+                      var value = image.reduceRegion(ee.Reducer.mean(), point, 100);
+                      return image.set('Tmax', value.get('Tmax')).set('DOY', image.get('DOI')).set('Fecha', image.get('fecha')).set('system:time_start',image.get('system:time_start')).clip(pointInf); 
+                }); 
+                prueba1=ee.List(mappedTmax.aggregate_array('DOY')).distinct();
+                Map.addLayer(mappedTmin.first())
+          }  
+          else { //Para los otros conjuntos de datos
+                var mapped = temperature.map(function(image){
+                      var value = image.reduceRegion(ee.Reducer.mean(), point, 100);
+                      return image.set('Tmax', value.get('Temp')).set('DOY', image.get('DOI')).set('Fecha', image.get('fecha')).set('system:time_start',image.get('system:time_start')).clip(pointInf) 
+                });  
+                prueba1=ee.List(mapped.aggregate_array('DOY')).distinct();
+                
+                 /*   
+                      var daysStep = 1;
+                      var timeSeries = ee.ImageCollection(
+                        ee.List.sequence(0, prueba1.size().subtract(1), daysStep)
+                          .map(function (offsetDays) {
+                            var start = ee.Date(fecha1).advance(offsetDays, 'days');
+                            var end = start.advance(daysStep, 'days');
+                            var composite = mapped
+                              .filterDate(start, end)
+                              .median(); // You need to decide how to combine the images
+                            return composite
+                              .set('system:time_start', start.millis())
+                              .set('empty', composite.bandNames().size().eq(0));
+                          })
+                        ).filterMetadata('empty', 'equals', 0);
+                
+          
+          //Map.addLayer(timeSeries.first())
+                */ 
+          }
+          var Rsmapped = Rs.map(function(image){ //Rs
+                var value = image.reduceRegion(ee.Reducer.mean(), point, 100);
+                return image.set('Radiation', value.get('Rs')).set('DOY', image.get('DOI')).set('system:time_start',image.get('system:time_start')).clip(pointInf); 
+          });
+          var VPmapped = VP.map(function(image){ //VP
+                var value = image.reduceRegion(ee.Reducer.mean(), point, 100); 
+                return image.set('Deficit', value.get('VP')).set('DOY', image.get('DOI')).clip(pointInf); 
+          });  
+          var U2mapped = u2.map(function(image){ //U2
+                var value = image.reduceRegion(ee.Reducer.mean(), point, 100);
+                return image.set('Velocity', value.get('u2')).set('DOY', image.get('DOI')).clip(pointInf); 
+          });
+          //============================================
+          //Se inician los calculos de ET0
+          //=============================================
+          //Variables
+          var valuesPerDOY;
+          var valuesPerDOY1;
+          var valuesPerDOY2;
+          var TmeanHS;
+          var TmaxHS;
+          var TminHS;
+          var TmeanPM;
+          var TmaxPM;
+          var TminPM;
+          var RsPM;
+          var VPPM;
+          var GrafIV0;
+          var fechaDOY;
+          var ivs2;
+           
+          
+          if (indSel == 1) { // 1. CALCULOS PARA LA ECUACION DE HARGREAVES AND SAMANI
+                var ETo = prueba1.map(function(i){
+                  if (MetData==2) {
+                      valuesPerDOY1 = ee.List(mappedTmin.filter(ee.Filter.eq('DOY', i)).aggregate_array('Tmin'));
+                      valuesPerDOY2 = ee.List(mappedTmax.filter(ee.Filter.eq('DOY', i)).aggregate_array('Tmax'));
+                      TmaxHS=ee.Number(valuesPerDOY2.reduce(ee.Reducer.max())).multiply(1);
+                      TminHS=ee.Number(valuesPerDOY1.reduce(ee.Reducer.min())).multiply(1);  
+                      TmeanHS=imp.T_Media(TminHS,TmaxHS);
+                      fechaDOY= ee.List(mappedTmin.filter(ee.Filter.eq('DOY', i)).aggregate_array('system:time_start'));
+                  }
+                  else {
+                      valuesPerDOY = ee.List(mapped.filter(ee.Filter.eq('DOY', i)).aggregate_array('Tmax'));
+                      TmeanHS=ee.Number(valuesPerDOY.reduce(ee.Reducer.mean())).multiply(1);
+                      TmaxHS=ee.Number(valuesPerDOY.reduce(ee.Reducer.max())).multiply(1);
+                      TminHS=ee.Number(valuesPerDOY.reduce(ee.Reducer.min())).multiply(1);   
+                      fechaDOY= ee.List(mapped.filter(ee.Filter.eq('DOY', i)).aggregate_array('system:time_start'));
+                  }
+                  var fecha=ee.Number(fechaDOY.reduce(ee.Reducer.mean())).multiply(1);  
+                  var ETO_3=imp.ETo_HS(TmaxHS,TminHS,TmeanHS, coords.lat, i, Kh_Value, Kt_value, Eh_Value); //HS Equation
+                  return ee.List(ee.Image.constant([ETO_3]).rename('ET0').set('system:time_start',fecha));
+                });
+                print(ETo)
+                //ETo=ETo.splice({start: 0, count: 1, other: null});//Se elimina el primero
+                ivs2 = ee.ImageCollection(ETo); //Se convierte a una coleccion de imagen
+                GrafIV0 = ui.Chart.image.series(ivs2,point, ee.Reducer.mean(),1)
+                            .setChartType('AreaChart')
+                            .setOptions({
+                                title: 'ETo with Hargreaves & Samani',
+                                hAxis:{title: 'Date', format: 'dd-MM-yyyy', gridlines: {count: 7, color: 'FFFFFF'}},
+                                vAxis: {title: 'mm/dia', gridlines: {color: 'FFFFFF'}},
+                                pointSize: 4,
+                                curveType: 'function',
+                                lineWidth: 1,
+                                chartArea: {backgroundColor: 'EBEBEB'}
+                });
+             
+          }//FIN H AND SAMANI=========================================================
+          else if (indSel === 0) { // 2. CALCULOS PARA LA ECUACION DE FAO56 PM
+                var EToS = prueba1.map(function(i){
+                  var RsvaluesPerDOY = ee.List(Rsmapped.filter(ee.Filter.eq('DOY', i)).aggregate_array('Radiation')); //Radiacion
+                  var VPvaluesPerDOY = ee.List(VPmapped.filter(ee.Filter.eq('DOY', i)).aggregate_array('Deficit'));//Presion de vapor
+                  var U2valuesPerDOY = ee.List(U2mapped.filter(ee.Filter.eq('DOY', i)).aggregate_array('Velocity'));//WindSpeed
+                  if (MetData==2) { //es para la base de datos de CFVSv2 que tienen datos Tmin y Tmax
+                      valuesPerDOY1 = ee.List(mappedTmin.filter(ee.Filter.eq('DOY', i)).aggregate_array('Tmin')); 
+                      valuesPerDOY2 = ee.List(mappedTmax.filter(ee.Filter.eq('DOY', i)).aggregate_array('Tmax'));
+                      TmaxPM=ee.Number(valuesPerDOY2.reduce(ee.Reducer.max())).multiply(1); //Tmax (°C)
+                      TminPM=ee.Number(valuesPerDOY1.reduce(ee.Reducer.min())).multiply(1); //Tmin (°C)
+                      TmeanPM=(TminPM.add(TmaxPM)).divide(ee.Number(2));                    //Tmean (°C)
+                      fechaDOY= ee.List(mappedTmin.filter(ee.Filter.eq('DOY', i)).aggregate_array('system:time_start'));
+                  }
+                  else {
+                      valuesPerDOY = ee.List(mapped.filter(ee.Filter.eq('DOY', i)).aggregate_array('Tmax'));
+                      TmeanPM=ee.Number(valuesPerDOY.reduce(ee.Reducer.mean())).multiply(1);  //TMean (°C)
+                      TmaxPM=ee.Number(valuesPerDOY.reduce(ee.Reducer.max())).multiply(1);    //Tmax (°C)
+                      TminPM=ee.Number(valuesPerDOY.reduce(ee.Reducer.min())).multiply(1);    //Tmin (°C)
+                      fechaDOY= ee.List(mapped.filter(ee.Filter.eq('DOY', i)).aggregate_array('system:time_start'));
+                  }            
+                  var fecha=ee.Number(fechaDOY.reduce(ee.Reducer.mean())).multiply(1);
+                  var U2PM=ee.Number(U2valuesPerDOY.reduce(ee.Reducer.mean())).multiply(1); //Wind speed (m/s)
+                  var Ra = imp.RExtraterrestre(i,coords.lat); //Solar Radiation (MJ/M2*dia)
+                  if (MetData==3) { // para encontrar la Rs con RTMA
+                      RsPM=ee.Number(RsvaluesPerDOY.reduce(ee.Reducer.mean())).multiply(Ra); 
+                  }
+                  else {
+                      RsPM=ee.Number(RsvaluesPerDOY.reduce(ee.Reducer.sum())).multiply(1);  
+                  }
+                  VPPM=ee.Number(VPvaluesPerDOY.reduce(ee.Reducer.mean())).multiply(1); //Actual vapor pressure VP (Kpa)
+                  var EToPM_ser = imp.ETo_PM(TmaxPM, TminPM, TmeanPM,VPPM,RsPM,U2PM, Ra, ElevaValue, P);
+                  return ee.List(ee.Image.constant([EToPM_ser]).rename('ETo').set('system:time_start',fecha));
+                });
+                  
+                ivs2 = ee.ImageCollection(EToS);
+                GrafIV0 = ui.Chart.image.series(ivs2,point, ee.Reducer.mean(),1)
+                            .setChartType('AreaChart')
+                            .setOptions({
+                                title: 'ETo with FAO-56 PM',
+                                hAxis:{title: 'Date',format: 'dd-MM-yyyy',  gridlines: {count: 7, color: 'FFFFFF'}},
+                                vAxis: {title: 'mm/dia', gridlines: {color: 'FFFFFF'}},
+                                pointSize: 4,
+                                curveType: 'function',
+                                lineWidth: 1,
+                                chartArea: {backgroundColor: 'EBEBEB'}
+                });
+          }//FIN FAO56 PM=====================================================================
+          else if (indSel == 3) { //3. CALCULOS PARA TEMPERATURA DEL AIRE
+              if (MetData==2) {
+                  temperature=dataset2.map(TMedia);
+              }
+              // temperature=temperature.map(ConversionTZ);
+              
+              
+              if (Hd_Response===true) { //Datos horarios de temperature
+                  GrafIV0 = ui.Chart.image.series(temperature,point, ee.Reducer.mean(), 50)
+                            .setOptions({
+                                title: 'Air temperature at 2 m',
+                                    hAxis:{title: 'Date',  format: 'MM-yyyy', gridlines: {count: 7, color: 'FFFFFF'}},
+                                    vAxis: {title: '°C', gridlines: {color: 'FFFFFF'}},
+                                    pointSize: 4,
+                                    curveType: 'function',
+                                    lineWidth: 1,
+                                    chartArea: {backgroundColor: 'EBEBEB'}
+                            });
+              }          
+              else { //Datos por dia Juliano de temperatura
+                  GrafIV0 = ui.Chart.image.doySeriesByYear(temperature, 'Temp',point, ee.Reducer.mean(), 50)
+                            .setOptions({
+                                title: 'Mean air temperature at 2 m',
+                                    hAxis:{title: 'Date', gridlines: {count: 7, color: 'FFFFFF'}},
+                                    vAxis: {title: '°C', gridlines: {color: 'FFFFFF'}},
+                                    pointSize: 4,
+                                    curveType: 'function',
+                                    lineWidth: 1,
+                                    chartArea: {backgroundColor: 'EBEBEB'}
+                            });
+              }
+          }//FIN TEMPERATURA==================================================================
+          else if (indSel == 4) { //4. CALCULOS PARA PRESION DE VAPOR ACTUAL
+              if (Hd_Response===true) { 
+                      GrafIV0 = ui.Chart.image.series(VP,point, ee.Reducer.mean(), 50)
+                                .setOptions({
+                                title: 'Variable: VP',
+                                hAxis:{title: 'Fecha', gridlines: {count: 7, color: 'FFFFFF'}},
+                                vAxis: {title: 'kPa', gridlines: {color: 'FFFFFF'}, viewWindow: {min: 0}},
+                                pointSize: 4,
+                                curveType: 'function',
+                                lineWidth: 1,
+                                chartArea: {backgroundColor: 'EBEBEB'}
+                      });        
+              }
+              else {
+                      GrafIV0 = ui.Chart.image.doySeriesByYear(VP,'VP', point, ee.Reducer.mean(), 50)
+                                .setOptions({
+                                title: 'Variable: VP',
+                                hAxis:{title: 'Fecha', gridlines: {count: 7, color: 'FFFFFF'}},
+                                vAxis: {title: 'kPa', gridlines: {color: 'FFFFFF'}, viewWindow: {min: 0}},
+                                pointSize: 4,
+                                curveType: 'function',
+                                lineWidth: 1,
+                                chartArea: {backgroundColor: 'EBEBEB'}
+                      });
+              }
+          } //FIN PRESION DE VAPOR=============================================================
+          else if (indSel == 5) {// 5. CALCULOS PARA RADIACION SOLAR
+             var Rs2
+             if (MetData==3) { //Es para la BD de RTMA !no hay datos horarios para RTMA¡
+                  Rs2 = prueba1.map(function(i){
+                      var RsvaluesPerDOY = ee.List(Rsmapped.filter(ee.Filter.eq('DOY', i)).aggregate_array('Radiation'));
+                      var Ra = imp.RExtraterrestre(i,coords.lat);
+                      fechaDOY= ee.List(Rsmapped.filter(ee.Filter.eq('DOY', i)).aggregate_array('system:time_start'));
+                      RsPM=ee.Number(RsvaluesPerDOY.reduce(ee.Reducer.mean())).multiply(Ra); 
+                      var fecha=ee.Number(fechaDOY.reduce(ee.Reducer.mean())).multiply(1);  
+                      return ee.List(ee.Image.constant([RsPM]).rename('Rs').set('system:time_start',fecha));
+                  });
+                      
+                  GrafIV0 = ui.Chart.image.series(Rs2,point, ee.Reducer.mean(),10)
+                                    .setChartType('AreaChart')
+                                    .setOptions({
+                                        title: 'Solar Radiation',
+                                        hAxis:{title: 'Fecha', format: 'dd-MM-yyyy', gridlines: {count: 7, color: 'FFFFFF'}},
+                                        vAxis: {title: 'MJ/m2*dia', gridlines: {color: 'FFFFFF'}},
+                                        pointSize: 4,
+                                        curveType: 'function',
+                                        lineWidth: 1,
+                                        chartArea: {backgroundColor: 'EBEBEB'}
+                  });
+             }
+            else { //Para las otras bases de datos
+                  if (Hd_Response===false) { //datos diarios de Rs
+                          Rs2 = prueba1.map(function(i){
+                              var RsvaluesPerDOY = ee.List(Rsmapped.filter(ee.Filter.eq('DOY', i)).aggregate_array('Radiation'));
+                              fechaDOY= ee.List(Rsmapped.filter(ee.Filter.eq('DOY', i)).aggregate_array('system:time_start'));
+                              RsPM=ee.Number(RsvaluesPerDOY.reduce(ee.Reducer.sum())).multiply(1); 
+                              var fecha=ee.Number(fechaDOY.reduce(ee.Reducer.mean())).multiply(1);  
+                              return ee.List(ee.Image.constant([RsPM]).rename('Rs').set('system:time_start',fecha));
+                          });          
+                      GrafIV0 = ui.Chart.image.series(Rs2,point, ee.Reducer.mean(),10)
+                                        .setChartType('AreaChart')
+                                        .setOptions({
+                                            title: 'Solar Radiation',
+                                            hAxis:{title: 'Fecha', format: 'dd-MM-yyyy', gridlines: {count: 7, color: 'FFFFFF'}},
+                                            vAxis: {title: 'MJ/m2*dia', gridlines: {color: 'FFFFFF'}},
+                                            pointSize: 4,
+                                            curveType: 'function',
+                                            lineWidth: 1,
+                                            chartArea: {backgroundColor: 'EBEBEB'}
+                      });
+                  }
+                  else { //Datos horarios de Rs
+                      GrafIV0 = ui.Chart.image.series(Rs,point, ee.Reducer.mean(),10)
+                                        .setChartType('AreaChart')
+                                        .setOptions({
+                                            title: 'Solar Radiation',
+                                            hAxis:{title: 'Fecha', format: 'dd-MM-yyyy', gridlines: {count: 7, color: 'FFFFFF'}},
+                                            vAxis: {title: 'MJ/m2', gridlines: {color: 'FFFFFF'}},
+                                            pointSize: 4,
+                                            curveType: 'function',
+                                            lineWidth: 1,
+                                            chartArea: {backgroundColor: 'EBEBEB'}
+                      });               
+                  }
+            } 
+          }
+          else if (indSel == 6) {// 5. CALCULOS PARA VELOCIDAD DE VIENTO===================
+              if (Hd_Response===true) { //Datos Horarios
+                    GrafIV0 = ui.Chart.image.series(u2,point, ee.Reducer.mean(),50)
+                            .setOptions({
+                                title: 'Wind speed at 2m',
+                                hAxis:{title: 'Fecha', gridlines: {count: 7, color: 'FFFFFF'}},
+                                vAxis: {title: 'm/s', gridlines: {color: 'FFFFFF'}, viewWindow: {min: 0}},
+                                pointSize: 4,
+                                curveType: 'function',
+                                lineWidth: 1,
+                                chartArea: {backgroundColor: 'EBEBEB'}
+                    });          
+              }
+              else { //datos diarios
+                    GrafIV0 = ui.Chart.image.doySeriesByYear(u2,'u2', point, ee.Reducer.mean(),50)
+                            .setOptions({
+                                title: 'Wind speed at 2m',
+                                hAxis:{title: 'Fecha', gridlines: {count: 7, color: 'FFFFFF'}},
+                                vAxis: {title: 'm/s', gridlines: {color: 'FFFFFF'}, viewWindow: {min: 0}},
+                                pointSize: 4,
+                                curveType: 'function',
+                                lineWidth: 1,
+                                chartArea: {backgroundColor: 'EBEBEB'}
+                    });
+              }
+          } 
+          //Un boton para minimizar la grafica
+          pangr.widgets().set(0,(ui.Button({
+                      label: 'Cerrar',
+                      onClick: function() {
+                        pangr.style().set('shown', false);
+                      }
+          })));
+          //Se agregan elementos a la grafica
+          pangr.widgets().set(1, GrafIV0);    
+                ElevaValue.evaluate(function(result2) {
+                  pangr.widgets().set(2, ui.Label({ 
+                      value: 'lon: ' + coords.lon.toFixed(2)+';  '+ ' lat: ' + coords.lat.toFixed(2)+ ';  '+'  Ele(msnm): ' + result2.toFixed(2),
+                      style: {stretch: 'vertical'}
+                }));
+          });
+        });
+            Map.add(pangr); 
+  }
+  else { //Cuando el usuario selecciona poligono********************************************************************************************************
+        Map.clear();
+        Map.setControlVisibility(true, true, false, true, true, true, false); //Se oculta el Drwing tools
+        var titulo_pol = ui.Panel({layout: ui.Panel.Layout.flow('horizontal')});
+        titulo_pol.add(ui.Label('Select a date to see the ET0/Variable Map'));
+        Map.style().set('cursor', 'crosshair');
+        Map.add(titulo_pol);  
+        proc2.setDisabled(true) //Se activa el boton de NewPolygon
+        
+        drawingTools.stop();// 1) parar el dibujo e importar la capa creada por el usuario
+        var modulo = drawingTools.getMap();
+        var om= drawingTools.toFeatureCollection(modulo);
+        //Ocultar la capa creada por el usuario
+        Map.drawingTools().layers().forEach(function(layer) {
+          layer.setShown(false);
+          
+        });
+        print(ee.String(VF_in.getValue()).length()==ee.Number(2))
+        print(ee.String(VF_in.getValue()).length())
+        var recorte
+          if (VF_Response===true){
+                if (VF_in.getValue()=='Mexico'){
+                  recorte= ee.FeatureCollection("USDOS/LSIB_SIMPLE/2017")
+                              .filter(ee.Filter.eq('country_na', 'Mexico'));
+                  proc3.setDisabled(true);
+                  print('Mexico', recorte)
+                }
+                else if (ee.String(VF_in.getValue()).length().getInfo()==2){
+                  recorte= table.filter(ee.Filter.eq('CVE_ENT',VF_in.getValue()));
+                  print(recorte)
+                }
+                
+                else {
+                  recorte=ee.FeatureCollection(VF_in.getValue());
+                  proc3.setDisabled(true)
+                }
+        }
+        else {
+           recorte = (om);
+           proc3.setDisabled(false)
+        }
+        
+        var parcelas = ee.Image().byte();
+          var bordes = parcelas.paint({
+            featureCollection: recorte,
+            color: 1,
+            width: 1
+        });
+        
+        //Comienza el ciclo para las opcioens diponibles de variables
+        var VariableS;
+        var NombreB;
+        var NombreEx;
+        var VMax;
+        var VMin;
+        var Vpalette;
+        if (indSel == 3) { //VARIABLE TEMPERATURA---------------------------------------
+              if (MetData==2) {
+                  VariableS=dataset2.map(TMedia);
+              }
+              else {
+                  VariableS=temperature;
+              }
+              NombreB='Temp';
+              NombreEx='Temperature (°C)';
+              VMin= -5;
+              VMax= 40;
+              Vpalette=St.Temp;
+        }
+        else if (indSel == 4) {
+              VariableS=VP;
+              NombreB='VP';
+              NombreEx='VaporPressure (kPa)'
+              VMin= 0;
+              VMax= 2.5;
+              Vpalette=St.Temp;
+          
+        }
+        else if (indSel == 5) {
+              VariableS=Rs;
+              NombreB='Rs';
+              NombreEx='SolarRadiation (MJ/m2*dia)'
+              VMin= 5;
+              VMax= 33;
+              Vpalette=St.Temp;          
+        }
+        else if (indSel == 6) {
+              VariableS=u2;
+              NombreB='u2';
+              NombreEx='WindSpeed (m/s)'
+              VMin= 0;
+              VMax= 10;
+              Vpalette=St.Temp;          
+        }
+        else if (indSel == 1 ||indSel ===0 ) {
+              NombreB='ET0';
+              NombreEx='ET0 (mm/dia)'
+              VMin= 0;
+              VMax= 10;
+              Vpalette=St.ETO;          
+        }        
+        
+        var VisCapa = {min: VMin, max: VMax, palette: Vpalette};
+        var layerImageLeft = ui.Map.Layer(ee.Image());
+        Map.layers().add(layerImageLeft);
+        var elev=elevation.clip(recorte)
+        var dateFormat;
+        var numberOfMonths;
+        var image2Label;
+        var image;
+        var startDate=ee.Date(fecha[0]);
+        var endDate =ee.Date(fecha[1]);
+        var avanza;
+        if (Hd_Response===true) {
+                dateFormat= 'yyyy-MM';
+                numberOfMonths = endDate.difference(startDate, 'months');
+                image2Label = ui.Label('Choose a month below');
+                avanza='months';
+        }
+        else {
+                dateFormat='dd-MM-yyyy';
+                numberOfMonths = endDate.difference(startDate, 'days');
+                image2Label = ui.Label('Choose a day below');
+                avanza='days';
+        }
+        var capa2=ui.Map.Layer(bordes, {palette: 'black'}, 'Polygon'); //poligono
+        var pan1 = imp2.Leyenda(NombreEx, VisCapa);
+        Map.add(pan1);
+        //LIsta de meses o dias que se despliega
+        var query2Panel = ui.Panel();
+        ee.List.sequence(0, numberOfMonths.subtract(1))
+                .map(function (monthOffset) {
+                return startDate
+                      .advance(monthOffset, avanza)
+                      .format(dateFormat)
+                })
+              //   // UI widgets need client-side objects, 
+              //   // but the list of months is server-side. 
+              //   // evaluate() converts from server-side to client-side
+                .evaluate(function (months) { 
+                  var dropdown = ui.Select({
+                    items: months,
+                    onChange: function (value){ 
+                                var startDate = ee.Date.parse(dateFormat, value)
+                                var DOI=startDate.getRelative('day', 'year');
+                                var endDate = startDate.advance(1, avanza)
+                                var image
+                                var Tmax
+                                var Tmin
+                                var Tmean
+                                var Rs_PM
+                                titulo_pol.clear();
+                                if (indSel == 1) { //Selecion de variables cono HS
+                                    if (MetData==2) {
+                                        Tmax = ee.Image(temperatureMax.select('Tmax').filterDate(startDate, endDate).max()).clip(recorte);
+                                        Tmin = ee.Image(temperatureMin.select('Tmin').filterDate(startDate, endDate).min()).clip(recorte);
+                                        image=imp_P.ETo_HSCFsV2(Tmax, Tmin, DOI, Kh_Value, Kt_value, Eh_Value);
+                                    }
+                                    else {
+                                        Tmax = ee.Image(temperature.select('Temp').filterDate(startDate, endDate).max()).clip(recorte);
+                                        Tmin = ee.Image(temperature.select('Temp').filterDate(startDate, endDate).min()).clip(recorte);
+                                        Tmean = ee.Image(temperature.select('Temp').filterDate(startDate, endDate).mean()).clip(recorte);
+                                        image=imp_P.ETo_HS(Tmax, Tmin, Tmean,DOI, Kh_Value, Kt_value, Eh_Value);
+                                    }
+                                }
+                                else if  (indSel === 0) { //Seleccion de variables con PM
+                                    var VP_PM = ee.Image(VP.select('VP').filterDate(startDate, endDate).mean()).clip(recorte);
+                                    var u2_PM = ee.Image(u2.select('u2').filterDate(startDate, endDate).mean()).clip(recorte);
+                                    var Pres = ee.Image(Presion.select('P').filterDate(startDate, endDate).mean()).clip(recorte);
+                                    if (MetData==2) {
+                                        Tmax = ee.Image(temperatureMax.select('Tmax').filterDate(startDate, endDate).max()).clip(recorte);
+                                        Tmin = ee.Image(temperatureMin.select('Tmin').filterDate(startDate, endDate).min()).clip(recorte);
+                                        Rs_PM = ee.Image(Rs.select('Rs').filterDate(startDate, endDate).sum()).clip(recorte);
+                                        image=imp_P.ETo_PMCFsV2(Tmax, Tmin ,VP_PM,Rs_PM,u2_PM, Pres, DOI,elev ); 
+                                    }
+                                    else if (MetData==3) {
+                                        Tmax = ee.Image(temperature.select('Temp').filterDate(startDate, endDate).max()).clip(recorte);
+                                        Tmin = ee.Image(temperature.select('Temp').filterDate(startDate, endDate).min()).clip(recorte);
+                                        Tmean = ee.Image(temperature.select('Temp').filterDate(startDate, endDate).mean()).clip(recorte);
+                                        Rs_PM = ee.Image(Rs.select('Rs').filterDate(startDate, endDate).mean()).clip(recorte);
+                                        image=imp_P.ETo_PMRTMA(Tmax, Tmin, Tmean,VP_PM,Rs_PM,u2_PM, Pres, DOI,elev);                                       
+                                    }
+                                    else {
+                                        Tmax = ee.Image(temperature.select('Temp').filterDate(startDate, endDate).max()).clip(recorte);
+                                        Tmin = ee.Image(temperature.select('Temp').filterDate(startDate, endDate).min()).clip(recorte);
+                                        Tmean = ee.Image(temperature.select('Temp').filterDate(startDate, endDate).mean()).clip(recorte);
+                                        Rs_PM = ee.Image(Rs.select('Rs').filterDate(startDate, endDate).sum()).clip(recorte);
+                                        image=imp_P.ETo_PM(Tmax, Tmin , Tmean,VP_PM,Rs_PM,u2_PM, Pres, DOI,elev); 
+                                    }
+                                }
+                                else {// Variables individuales (Temperatura, PV, Rs y u2 )
+                                  if (MetData==3 && indSel == 5) { //RTMA and Solar radiation
+                                    Rs_PM = ee.Image(Rs.select('Rs').filterDate(startDate, endDate).mean()).clip(recorte);
+                                    image=imp_P.Rs_RTMA(Rs_PM, DOI);
+                                  }
+                                  else if (indSel == 5 && Hd_Response===true ) { //Solar radiation and hourly data
+                                    var DFecha=endDate.difference(startDate, 'days')
+                                    print(Dfecha)
+                                    image = ee.Image(VariableS.select(NombreB).filterDate(startDate, endDate).sum().divide(ee.Number(DFecha))).clip(recorte);
+                                  }
+                                  else {
+                                    image = ee.Image(VariableS.select(NombreB).filterDate(startDate, endDate).mean()).clip(recorte);
+                                  }
+                                }
+                                var capa1= ui.Map.Layer(image, VisCapa, NombreEx)
+                                if (indSel == 3) { 
+                                    var imageMax = ee.Image(VariableS.select(NombreB).filterDate(startDate, endDate).max()).clip(recorte);
+                                    var imageMin = ee.Image(VariableS.select(NombreB).filterDate(startDate, endDate).min()).clip(recorte);
+                                    var capa3 = ui.Map.Layer(imageMax, VisCapa, 'Temp_Max')
+                                    var capa4 = ui.Map.Layer(imageMin, VisCapa, 'Temp_Min')
+                                    Map.layers().reset([capa1,capa3,capa4, capa2]);
+                                }
+                                else {
+                                  Map.layers().reset([capa1,capa2]);
+                                }
+
+
+                                var FechaString=ee.String(startDate.get('year')).cat('-').cat((startDate.format('MM')).cat('-').cat(startDate.format('dd')));
+                                //Se agrega os botones para descarga de imagenes
+                                DownloadC1_Button.setUrl(getURLIMAGE(image,NombreB, FechaString.getInfo(), recorte,ResolutionDB));
+                                DownloadC2_Button.setUrl(getVectorFile(recorte));
+                               // Map.addLayer(geometry)
+                                
+                                        
+                                // Register a callback on the map to be invoked when the map is clicked.
+                                Map.onClick(function(coords) {
+                                  // Clear the panel and show a loading message.
+                                  titulo_pol.clear();
+                                  titulo_pol.style().set('shown', true);
+                                  titulo_pol.add(ui.Label('Loading...', {color: 'gray'}));
+                                
+                                  // Compute the mean NDVI; a potentially long-running server operation.
+                                  var point = ee.Geometry.Point(coords.lon, coords.lat);
+                                  var temporalMean = image.reduce(ee.Reducer.mean());
+                                  var sampledPoint = temporalMean.reduceRegion(ee.Reducer.mean(), point, 10);
+                                  var computedValue = sampledPoint.get('mean');
+                                  // Request the value from the server and use the results in a function.
+                                  computedValue.evaluate(function(result) {
+                                    titulo_pol.clear();
+                                
+                                    // Add a label with the results from the server.
+                                    titulo_pol.add(ui.Label({
+                                      value: NombreEx +': ' + result.toFixed(3),
+                                      style: {stretch: 'vertical'}
+                                    }));
+                                
+                                    // Add a button to hide the Panel.
+                                    titulo_pol.add(ui.Button({
+                                      label: 'Close',
+                                      onClick: function() {
+                                        titulo_pol.style().set('shown', false);
+                                      }
+                                    }));
+                                  });
+                                });
+                                
+                                
+                    }
+                  })
+                  
+                  dropdown.setValue(months[0])
+                  panel1.add(image2Label)
+                  panel1.add(dropdown)
+                  panel1.add(query2Panel)
+                  
+                }) 
+        downloadIV.style().set('shown', true);
+        downloadVFile.style().set('shown', true);
+
+        
+        
+        //TERMITA VARIABLE-------------------------------------------------
+  }
+  Map.add(panel1);
+}
+
+
+var inifap_leyend = ui.Label('Web INIFAP');
+inifap_leyend.style().set('position', 'bottom-left');
+inifap_leyend.setUrl('https://www.gob.mx/inifap')
+//adjust the settings and click accept
+Map.add(ImgButton)
+Map.add(inifap_leyend);
+Map.setControlVisibility(true, true, false, true, true, true, false);
+Map.setCenter(-101.59, 24.10, 6);
+Map.setOptions('hybrid');
+Map.style().set('cursor', 'hand');
+ui.root.insert(0, panel);
