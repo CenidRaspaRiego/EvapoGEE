@@ -1,1 +1,5 @@
+1. The "EVAPOGEE" file contains the application interface code and the functions that are called
+2. FuncionesETo_Point: Contains the function codes when calculations are made on specific points.
+3. FuncionesETo_Point: Contains the function codes when calculations are made on polygons.
+
 
